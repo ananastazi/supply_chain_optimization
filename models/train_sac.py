@@ -1,54 +1,58 @@
 import os
 import gymnasium as gym
 from stable_baselines3 import SAC
-from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.monitor import Monitor
 
-# Import your custom environment
 from envs.inventory_env import InventoryEnv
 
+def make_env(data_path):
+    env = InventoryEnv(config={"data_path": data_path})
+    env = Monitor(env)
+    return env
+
 def train_sac():
-    print("--- Starting SAC Training ---")
+    print("--- Starting SAC Advanced Training ---")
     
-    # 1. Setup Directories
     models_dir = "models/sac"
     log_dir = "logs/sac"
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
-    # 2. Initialize Environment
-    # SAC works fine with a single environment, but we wrap it for consistency
-    env = InventoryEnv()
-    check_env(env)
-    env = DummyVecEnv([lambda: InventoryEnv()])
+    # Training & Validation Envs
+    train_env = DummyVecEnv([lambda: make_env('data/train_data.csv')])
+    eval_env = DummyVecEnv([lambda: make_env('data/test_data.csv')])
 
-    # 3. Define the Model (SAC)
-    # Hyperparameters:
-    # - buffer_size=100000: Memories to keep. Large buffers stabilize training.
-    # - learning_starts=1000: Don't learn immediately. 
-    #   Just take random actions for 1000 steps to fill the buffer first.
-    #   This breaks the correlation of initial steps.
-    model = SAC(
-        "MlpPolicy", 
-        env, 
-        verbose=1, 
-        tensorboard_log=log_dir,
-        buffer_size=100000,    # Large memory
-        learning_starts=1000,  # Collect random data first
-        batch_size=256,        # SAC likes larger batches than PPO
-        ent_coef='auto'        # SAC automatically tunes entropy (Recommended)
+    # Callback
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=models_dir,
+        log_path=log_dir,
+        eval_freq=10000,
+        n_eval_episodes=20,
+        deterministic=True,
+        render=False
     )
 
-    # 4. Train
-    # SAC is slower per step (more math) but learns faster in terms of episodes.
-    TIMESTEPS = 50000 # SAC often needs fewer steps than PPO
-    model.learn(total_timesteps=TIMESTEPS, tb_log_name="SAC_run")
+    # SAC Model
+    model = SAC(
+        "MlpPolicy", 
+        train_env, 
+        verbose=1, 
+        tensorboard_log=log_dir,
+        buffer_size=100000,
+        learning_starts=1000,
+        batch_size=256,
+        ent_coef='auto'
+    )
 
-    # 5. Save the Model
-    model_path = os.path.join(models_dir, "sac_inventory_final")
-    model.save(model_path)
-    
-    print(f"--- SAC Training Complete. Model saved to {model_path}.zip ---")
+    # Train
+    TIMESTEPS = 300000
+    print(f"Training for {TIMESTEPS} timesteps...")
+    model.learn(total_timesteps=TIMESTEPS, callback=eval_callback, tb_log_name="SAC_Advanced")
+
+    print("--- SAC Training Complete ---")
 
 if __name__ == "__main__":
     train_sac()

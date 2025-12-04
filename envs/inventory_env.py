@@ -25,7 +25,8 @@ class InventoryEnv(gym.Env):
         self.shortage_penalty = 20.0 # Penalty for missing a sale (Opportunity cost + Brand damage)
         
         # Load the Data Engine from Phase 1
-        self.sampler = DemandSampler('data/train_data.csv')
+        data_path = self.config.get("data_path", 'data/train_data.csv')
+        self.sampler = DemandSampler(data_path)
 
         # --- 2. Action Space (Phase 2.2) ---
         # Continuous value between 0 and 1.
