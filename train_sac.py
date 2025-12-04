@@ -48,7 +48,7 @@ def train_sac():
     )
 
     # Train
-    TIMESTEPS = 300000
+    TIMESTEPS = 300000 # set to 80 000
     print(f"Training for {TIMESTEPS} timesteps...")
     model.learn(total_timesteps=TIMESTEPS, callback=eval_callback, tb_log_name="SAC_Advanced")
 

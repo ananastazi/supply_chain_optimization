@@ -55,7 +55,7 @@ def train_ppo():
         verbose=1, 
         tensorboard_log=log_dir,
         ent_coef=0.01,
-        learning_rate=0.0003,
+        learning_rate=0.00005,
         batch_size=64
     )
 

@@ -26,7 +26,8 @@ class InventoryEnv(gym.Env):
         
         # Load the Data Engine from Phase 1
         data_path = self.config.get("data_path", 'data/train_data.csv')
-        self.sampler = DemandSampler(data_path)
+        is_sequential = self.config.get("sequential", False)
+        self.sampler = DemandSampler(data_path, sequential=is_sequential)
 
         # --- 2. Action Space (Phase 2.2) ---
         # Continuous value between 0 and 1.
@@ -53,6 +54,8 @@ class InventoryEnv(gym.Env):
         Resets the environment to start a new 'Year' (Episode).
         """
         super().reset(seed=seed)
+
+        self.sampler.reset()
         
         # Start with some random stock to prevent immediate crash
         self.inventory = np.random.randint(20, 50)
@@ -108,9 +111,7 @@ class InventoryEnv(gym.Env):
         
         raw_reward = revenue - holding_costs - penalty
         
-        # SCALING: Normalize reward to be roughly [-1, 1] for stable training
-        # Assuming max daily profit is roughly 500, we divide by 100
-        reward = raw_reward / 100.0
+        reward = raw_reward / 2000.0 
 
         # 7. Time updates
         self.current_step += 1
