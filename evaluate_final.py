@@ -4,19 +4,16 @@ import gymnasium as gym
 from stable_baselines3 import PPO, SAC
 from envs.inventory_env import InventoryEnv
 
-# --- Configuration ---
+# Configuration
 TEST_DATA_PATH = 'data/test_data.csv'
 PPO_MODEL_PATH = "models/ppo/best_model.zip"
 SAC_MODEL_PATH = "models/sac/best_model.zip"
 
 def run_test(agent, env_config, agent_name="Agent"):
-    """
-    Runs a full sequential pass through the test data.
-    """
-    # Initialize Env with the config (Sequential Mode)
+    # Initialization of the environment
     env = InventoryEnv(config=env_config)
     
-    # Reset (Forces sampler to start at Row 0 of test_data.csv)
+    # Resetting the environment
     obs, _ = env.reset(seed=42) 
     terminated = False
     
@@ -31,22 +28,20 @@ def run_test(agent, env_config, agent_name="Agent"):
     
     while not terminated:
         if agent == "Baseline":
-            # --- TRADITIONAL HEURISTIC (Min-Max) ---
-            # "If inventory < 20, Order up to 80."
+            # If inventory < 20, Order up to 80
             current_inv = env.inventory
             if current_inv < 20:
                 needed = 80 - current_inv
-                action = [needed / env.max_order] # Normalize
+                action = [needed / env.max_order]
             else:
                 action = [0.0]
         else:
-            # --- AI AGENT ---
-            # deterministic=True removes random noise from the agent's brain
+            # Prediction of the next action without randomness
             action, _ = agent.predict(obs, deterministic=True)
             
         obs, reward, terminated, truncated, info = env.step(action)
         
-        # Accumulate metrics (Unscale reward to get real $$$)
+        # Conversion of reward to actual profit
         total_reward += (reward * 2000.0) 
         total_sales += info['sales']
         total_demand += info['demand']
@@ -57,7 +52,7 @@ def run_test(agent, env_config, agent_name="Agent"):
         
         steps += 1
             
-    # Calculate KPIs
+    # Calculation of KPIs
     service_level = (total_sales / total_demand) * 100 if total_demand > 0 else 0
     avg_inv = np.mean(inventory_levels)
     
@@ -80,7 +75,6 @@ if __name__ == "__main__":
     print("--- STARTING PHASE 5: BACKTESTING ---")
     print("Loading Models...")
     
-    # Load Agents
     try:
         ppo_model = PPO.load(PPO_MODEL_PATH)
         print("PPO Loaded.")
@@ -95,20 +89,18 @@ if __name__ == "__main__":
         sac_model = None
         print("SAC Model not found.")
 
-    # Define Env Config for Testing
-    # This triggers the 'Sequential' logic in the Env and Sampler
     test_config = {
         "data_path": TEST_DATA_PATH, 
         "sequential": True 
     }
     
-    # 1. Run Baseline (Traditional Logic)
+    # Running Baseline
     run_test("Baseline", test_config, agent_name="Traditional Rule (Min-Max)")
     
-    # 2. Run PPO
+    # Running PPO
     if ppo_model:
         run_test(ppo_model, test_config, agent_name="PPO Agent")
         
-    # 3. Run SAC
+    # Running SAC
     if sac_model:
         run_test(sac_model, test_config, agent_name="SAC Agent")
