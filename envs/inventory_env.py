@@ -15,36 +15,41 @@ class InventoryEnv(gym.Env):
         
         # --- 1. Configuration (Business Rules) ---
         self.config = config or {}
-        self.max_capacity = self.config.get("max_capacity", 200) # Max shelf space
-        self.lead_time = self.config.get("lead_time", 5)         # Days to arrive
+        self.max_capacity = self.config.get("max_capacity", 1000) # Max shelf space
+        # Days to arrive
+        self.min_lead_time = self.config.get("min_lead_time", 3) 
+        self.max_lead_time = self.config.get("max_lead_time", 10) 
         self.max_order = self.config.get("max_order", 100)       # Max items per order
         
-        # Costs & Prices (From your prompt)
-        self.unit_price = 10.0      # Revenue per unit sold
-        self.holding_cost = 0.5     # Cost to keep 1 unit overnight
+        # Costs & Prices
+        self.unit_price = 70.0      # Revenue per unit sold
+        self.holding_cost = 1.5     # Cost to keep 1 unit overnight
         self.shortage_penalty = 20.0 # Penalty for missing a sale (Opportunity cost + Brand damage)
-        
-        # Load the Data Engine from Phase 1
+        self.reward_scale = self.config.get("reward_scale", 2000.0)
+
+        # Data Engine 
         data_path = self.config.get("data_path", 'data/train_data.csv')
         is_sequential = self.config.get("sequential", False)
         self.sampler = DemandSampler(data_path, sequential=is_sequential)
 
-        # --- 2. Action Space (Phase 2.2) ---
+        # Action Space 
         # Continuous value between 0 and 1.
         # 0.0 = Don't order. 1.0 = Order 'max_order' units.
         self.action_space = spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
-        # --- 3. Observation Space (Phase 2.1) ---
+        # Observation Space
+        # State = [Inv, Pipeline_0 ... Pipeline_MAX_LT, Time(4)]
         # Components:
         # 1. Current Stock (1 value)
         # 2. Pipeline Vector (Length = lead_time) -> "What is arriving in 1 day, 2 days..."
         # 3. Time Encoding (4 values) -> Sin/Cos of Day and Month
-        obs_size = 1 + self.lead_time + 4
+        obs_size = 1 + self.max_lead_time + 5
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_size,), dtype=np.float32)
 
         # Simulation State Variables
         self.inventory = 0
         self.pipeline = [] # Queue for orders in transit
+        self.actual_lead_time = 5
         self.current_step = 0
         self.day_of_week = 0 # 0=Mon
         self.month = 1       # 1=Jan
@@ -56,12 +61,14 @@ class InventoryEnv(gym.Env):
         super().reset(seed=seed)
 
         self.sampler.reset()
+
+        self.actual_lead_time = np.random.randint(self.min_lead_time, self.max_lead_time + 1)
         
         # Start with some random stock to prevent immediate crash
-        self.inventory = np.random.randint(20, 50)
+        self.inventory = np.random.randint(50, 150)
         
         # Empty pipeline (nothing ordered yet)
-        self.pipeline = [0] * self.lead_time
+        self.pipeline = [0] * self.actual_lead_time
         
         # Reset Time
         self.current_step = 0
@@ -99,9 +106,9 @@ class InventoryEnv(gym.Env):
         # 5. Update Inventory
         self.inventory -= sales
         
-        # Cap inventory (Shelf space limit) - Optional logic
-        # If we have too much, it spills over (or we just pay holding cost on all of it)
-        # self.inventory = min(self.inventory, self.max_capacity)
+        # Cap inventory (Shelf space limit)
+        # If we have too much, it spills over
+        self.inventory = min(self.inventory, self.max_capacity)
 
         # 6. Reward Calculation
         # Profit = Revenue - Holding Cost - Shortage Penalty
@@ -111,7 +118,7 @@ class InventoryEnv(gym.Env):
         
         raw_reward = revenue - holding_costs - penalty
         
-        reward = raw_reward / 2000.0 
+        reward = raw_reward / self.reward_scale
 
         # 7. Time updates
         self.current_step += 1
@@ -129,7 +136,8 @@ class InventoryEnv(gym.Env):
             "sales": sales,
             "inventory": self.inventory,
             "ordered": order_quantity,
-            "profit": raw_reward
+            "profit": raw_reward,
+            "lead_time": self.actual_lead_time
         }
 
         return self._get_obs(), reward, terminated, truncated, info
@@ -140,17 +148,26 @@ class InventoryEnv(gym.Env):
         Normalizes values to help the Neural Network.
         """
         # Normalize Inventory
-        norm_inv = self.inventory / self.max_capacity
+        # We divide by log(max_capacity) ~ 7.0 to keep it near 0-1
+        norm_inv = np.log1p(self.inventory) / np.log1p(self.max_capacity)
         
         # Normalize Pipeline
         norm_pipeline = [x / self.max_order for x in self.pipeline]
+
+        # Pad with -1 or 0 to fill the vector up to MAX_LEAD_TIME
+        # -1 helps the NN distinguish "Zero Order coming" vs "Nothing exists here"
+        # But 0 is usually fine. Let's use 0.
+        padding_needed = self.max_lead_time - len(norm_pipeline)
+        padded_pipeline = norm_pipeline + [-1.0] * padding_needed
         
-        # Cyclic Time Encoding (The "Sin/Cos" Trick)
+        # Cyclic Time Encoding
         # This helps NN understand that Day 6 (Sun) is close to Day 0 (Mon)
         day_sin = np.sin(2 * np.pi * self.day_of_week / 7)
         day_cos = np.cos(2 * np.pi * self.day_of_week / 7)
         month_sin = np.sin(2 * np.pi * self.month / 12)
         month_cos = np.cos(2 * np.pi * self.month / 12)
 
-        obs = np.concatenate(([norm_inv], norm_pipeline, [day_sin, day_cos, month_sin, month_cos]))
+        norm_lead_time = self.actual_lead_time / self.max_lead_time
+
+        obs = np.concatenate(([norm_inv], padded_pipeline, [day_sin, day_cos, month_sin, month_cos, norm_lead_time]))
         return obs.astype(np.float32)

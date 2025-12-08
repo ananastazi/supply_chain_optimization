@@ -80,7 +80,6 @@ if __name__ == "__main__":
    
     csv_filename = 'D:/Personal/Uni/MSc/Studies/1year/1point/rf/supply_chain_optimization/supply_chain_optimization/data/sales_data.csv' 
     
-    
     if not os.path.exists(csv_filename):
         print(f"Warning: {csv_filename} not found. Please download the dataset.")
     else:

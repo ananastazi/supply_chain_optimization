@@ -1,21 +1,12 @@
 import os
 import gymnasium as gym
 from stable_baselines3 import PPO
-from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
-from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import EvalCallback
 
-from envs.inventory_env import InventoryEnv
+from envs.utils.make_env import make_env
 
-def make_env(data_path):
-    """
-    Utility to create an environment with specific data (Train vs Test).
-    Wrapped in Monitor to track stats for TensorBoard.
-    """
-    env = InventoryEnv(config={"data_path": data_path})
-    env = Monitor(env) # Helper to log episode rewards
-    return env
+from envs.env_config import config
 
 def train_ppo():
     print("--- Starting PPO Advanced Training ---")
@@ -28,11 +19,15 @@ def train_ppo():
 
     # 2. Create Environments
     # Training Env: Uses 'train_data.csv' (Bootstrapping with Noise)
-    train_env = DummyVecEnv([lambda: make_env('data/train_data.csv')])
+    train_env = DummyVecEnv([
+        lambda: make_env(config["train_data_path"], is_sequential=False)
+    ])
     
-    # Validation Env: Uses 'test_data.csv' (Unseen data)
-    # We use this to check if the model is generalizing or overfitting
-    eval_env = DummyVecEnv([lambda: make_env('data/test_data.csv')])
+    # Evaluation: Uses Test Data + Sequential Replay (sequential=True)
+    # We want to test how it performs on the specific historical sequence of the test set.
+    eval_env = DummyVecEnv([
+        lambda: make_env(config["test_data_path"], is_sequential=True)
+    ])
 
     # 3. Define the Callback
     # - Evaluate every 10,000 steps
@@ -60,8 +55,7 @@ def train_ppo():
     )
 
     # 5. Train
-    # Increased to 300,000 as requested for better convergence
-    TIMESTEPS = 300000 
+    TIMESTEPS = 500000 
     
     print(f"Training for {TIMESTEPS} timesteps...")
     model.learn(total_timesteps=TIMESTEPS, callback=eval_callback, tb_log_name="PPO_Advanced")
