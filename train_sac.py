@@ -10,19 +10,23 @@ from envs.utils.make_env import make_env
 def train_sac():
     print("Starting SAC Advanced Training")
     
-    #we define the paths to save the models and the logs for tensorboard analysis
+    # 1. SETUP FOLDERS
+    # we create specific folders to save our "brains" (models) and the graphs (logs)
     models_dir = "models/sac"
     log_dir = "logs/sac"
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
-    #environment setup: we stricltly separate the data with training environment that uses the first 80% of history to learn and then evaluation environment that uses the last 20% to validat performance on unseen
+    # 2. TRAINING ENVIRONMENT
+    # we use 'is_sequential=False'. this shuffles the days randomly
+    # goal: Force the agent to learn the general rules of supply chain, not just memorize the dates
     train_env = DummyVecEnv([
         lambda: make_env(config["train_data_path"], is_sequential=False)
     ])
     
-    # Evaluation: Uses Test Data + Sequential Replay (sequential=True)
-    # We want to test how it performs on the specific historical sequence of the test set.
+    # 3. EVALUATION ENVIRONMENT
+    # we use 'is_sequential=True'. This keeps the real chronological order
+    # goal: Test how the agent performs in a realistic timeline simulation
     eval_env = DummyVecEnv([
         lambda: make_env(config["test_data_path"], is_sequential=True)
     ])
@@ -38,20 +42,24 @@ def train_sac():
         render=False
     )
 
-    # SAC (Soft Actor-Critic) Model: we implemented the SAC algotithm as a challenger to PPO. Because our action space is continuous like we order specific quantities of inventory, SAC is a good fit for this kind of problem. And also because we hypothesized that SAC might be more sample-efficient than PPO.
+    # 5. DEFINING THE AGENT (SAC)
+    # we chose SAC as a challenger to PPO. It's usually better at "Continuous Control" (like deciding the exact amount of inventory to buy)
     model = SAC(
         "MlpPolicy", 
         train_env, 
         verbose=1, 
         tensorboard_log=log_dir,
-        buffer_size=100000, #this algorithm is an "off-policy" meaning it learns from past experiences stored in a  buffer. we set a large buffer to provide a rich history for the agent to learn from 
-        learning_starts=5000, #we force the agent to explore randomly for the first 1000 steps. this prevents it from converging too early on a bad strategy without trying options
-        batch_size=256, #we let the algorithm automatically tune the entropy of the policy to balance exploration and exploitation
-        ent_coef='auto',
+        buffer_size=100000, # unlike PPO, SAC remembers past experiences. It stores 100k steps here to "review" them later
+        learning_starts=5000, #we increased this number significantly, because our environment is very random (demand and delivery times change a lot). if the agent starts learning immediately, it might jump to wrong conclusions based on just a few lucky or unlucky days. by waiting 5000 steps (about 13 simulated years), we force it to gather a lot of diverse experiences before it starts forming a strategy
+        batch_size=256, 
+        ent_coef='auto', # we let the algorithm automatically tune the entropy of the policy to balance exploration and exploitation
         gradient_steps=1,
         learning_rate=3e-4, 
     )
 
+
+    # 6. TRAINING THE AGENT
+    # we run for 300,000 steps. this is less than PPO because SAC is "Sample Efficient" (it learns faster from data)
     TIMESTEPS = 300000 
     print(f"Training for {TIMESTEPS} timesteps...")
     model.learn(total_timesteps=TIMESTEPS, callback=eval_callback, tb_log_name="SAC_Advanced")
