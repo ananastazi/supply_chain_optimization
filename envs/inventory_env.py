@@ -6,14 +6,14 @@ from envs.demand_sampler import DemandSampler
 class InventoryEnv(gym.Env):
     """
     Custom Environment for Inventory Management
-    State: [Current_Stock, Pipeline_Orders..., Day_Sin, Day_Cos, Month_Sin, Month_Cos]
+    State: [Current_Stock, Pipeline_Orders..., Day_Sin, Day_Cos, Month_Sin, Month_Cos, Lead Time Signal]
     Action: Order Quantity (Normalized 0-1)
     """
 
     def __init__(self, config=None):
         super(InventoryEnv, self).__init__()
         
-        # --- 1. Configuration (Business Rules) ---
+        # Configuration (Business Rules)
         self.config = config or {}
         self.max_capacity = self.config.get("max_capacity", 1000) # Max shelf space
         # Days to arrive
@@ -38,11 +38,11 @@ class InventoryEnv(gym.Env):
         self.action_space = spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
         # Observation Space
-        # State = [Inv, Pipeline_0 ... Pipeline_MAX_LT, Time(4)]
         # Components:
         # 1. Current Stock (1 value)
-        # 2. Pipeline Vector (Length = lead_time) -> "What is arriving in 1 day, 2 days..."
+        # 2. Pipeline Vector (Length = lead_time) -> "What is arriving in 1 day, 2 days..." (10 Values)
         # 3. Time Encoding (4 values) -> Sin/Cos of Day and Month
+        # 4. Lead Time Signal (1 Value)
         obs_size = 1 + self.max_lead_time + 5
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_size,), dtype=np.float32)
 
@@ -55,9 +55,6 @@ class InventoryEnv(gym.Env):
         self.month = 1       # 1=Jan
 
     def reset(self, seed=None, options=None):
-        """
-        Resets the environment to start a new 'Year' (Episode).
-        """
         super().reset(seed=seed)
 
         self.sampler.reset()
@@ -78,39 +75,35 @@ class InventoryEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action):
-        """
-        Phase 2.3: The Physics of the simulation.
-        """
-        # 1. Interpret Action
+        # Interpret Action
         # Model outputs [0.0 - 1.0], we scale it to [0 - max_order]
         order_amount_pct = np.clip(action[0], 0, 1)
         order_quantity = int(order_amount_pct * self.max_order)
 
-        # 2. Demand Generation (Using Phase 1 Sampler)
-        # We ask: "What is the demand for this specific Month & Day?"
+        # Demand Generation
+        # "What is the demand for this specific Month & Day?"
         real_demand = self.sampler.sample(self.month, self.day_of_week)
 
-        # 3. Pipeline Dynamics (Time Delay)
-        # a. Receive goods that were ordered 'lead_time' days ago
+        # Receive goods that were ordered 'lead_time' days ago
         arriving_inventory = self.pipeline.pop(0) 
         self.inventory += arriving_inventory
         
-        # b. Add NEW order to the back of the pipeline
+        # Add new order to the back of the pipeline
         self.pipeline.append(order_quantity)
 
-        # 4. Calculate Sales
-        # You can't sell what you don't have
+        # Calculate Sales
+        # we can't sell what we don't have
         sales = min(self.inventory, real_demand)
         missed_sales = real_demand - sales
         
-        # 5. Update Inventory
+        # Update Inventory
         self.inventory -= sales
         
-        # Cap inventory (Shelf space limit)
+        # Shelf space limit:
         # If we have too much, it spills over
         self.inventory = min(self.inventory, self.max_capacity)
 
-        # 6. Reward Calculation
+        # Reward Calculation
         # Profit = Revenue - Holding Cost - Shortage Penalty
         revenue = sales * self.unit_price
         holding_costs = self.inventory * self.holding_cost
@@ -120,13 +113,13 @@ class InventoryEnv(gym.Env):
         
         reward = raw_reward / self.reward_scale
 
-        # 7. Time updates
+        # Time updates
         self.current_step += 1
         self.day_of_week = (self.day_of_week + 1) % 7
         if self.current_step % 30 == 0: # Rough approximation of a month passing
             self.month = (self.month % 12) + 1
 
-        # 8. Termination
+        # Termination
         # Episode ends after 1 year (365 steps)
         terminated = self.current_step >= 365
         truncated = False
@@ -148,15 +141,14 @@ class InventoryEnv(gym.Env):
         Normalizes values to help the Neural Network.
         """
         # Normalize Inventory
-        # We divide by log(max_capacity) ~ 7.0 to keep it near 0-1
+        # We divide by log(max_capacity) to keep it near 0-1
         norm_inv = np.log1p(self.inventory) / np.log1p(self.max_capacity)
         
         # Normalize Pipeline
         norm_pipeline = [x / self.max_order for x in self.pipeline]
 
-        # Pad with -1 or 0 to fill the vector up to MAX_LEAD_TIME
-        # -1 helps the NN distinguish "Zero Order coming" vs "Nothing exists here"
-        # But 0 is usually fine. Let's use 0.
+        # Pad with -1 or 0 to fill the vector up to max_lead_time
+        # -1 helps the NN distinguish "Zero Order coming" between "Nothing exists here"
         padding_needed = self.max_lead_time - len(norm_pipeline)
         padded_pipeline = norm_pipeline + [-1.0] * padding_needed
         

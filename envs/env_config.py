@@ -1,11 +1,11 @@
 config = {
-        "train_data_path": "data/train_data.csv",  # Path to training data
-        "test_data_path": "data/test_data.csv",    # Path to testing data
-
+        "train_data_path": "data/train_data.csv",  
+        "test_data_path": "data/test_data.csv",
+            
         # Data-Dependent Constants
-        "max_capacity": 987,     # e.g., if max history was 520
-        "max_order": 301,         # e.g., if max demand was 110
-        "unit_price": 66.36,       # From your csv
+        "max_capacity": 987,     
+        "max_order": 301,         
+        "unit_price": 66.36,      
         "reward_scale": 1333.8,   # Calculated scale factor
         
         # Random Lead Time Settings
