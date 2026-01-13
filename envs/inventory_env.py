@@ -43,9 +43,9 @@ class InventoryEnv(gym.Env):
         # 2. Pipeline Vector (Length = lead_time) -> "What is arriving in 1 day, 2 days..." (10 Values)
         # 3. Time Encoding (4 values) -> Sin/Cos of Day and Month
         # 4. Lead Time Signal (1 Value)
-        obs_size = 1 + self.max_lead_time + 5
+        obs_size = 1 + self.max_lead_time + 4 + 1 + 1
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_size,), dtype=np.float32)
-
+        self.recent_demand_history = []
         # Simulation State Variables
         self.inventory = 0
         self.pipeline = [] # Queue for orders in transit
@@ -56,21 +56,29 @@ class InventoryEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        
+        # Reset the Sampler
+        # It returns the actual date of the data chunk to use
+        start_month, start_day = self.sampler.reset()
+        
+        # Sync Environment Time with Data Time
+        self.month = start_month
+        self.day_of_week = start_day
+        self.current_step = 0
+        
+        # Initialization of History
+        current_idx = self.sampler.current_idx
+        initial_demand = self.sampler.df.iloc[current_idx]['Adjusted_Demand']
+        self.recent_demand_history = [float(initial_demand)] * 5
 
-        self.sampler.reset()
-
+        # Randomized Lead Time
         self.actual_lead_time = np.random.randint(self.min_lead_time, self.max_lead_time + 1)
         
-        # Start with some random stock to prevent immediate crash
+        # Inventory Initialization
         self.inventory = np.random.randint(50, 150)
         
-        # Empty pipeline (nothing ordered yet)
+        # Clear Pipeline
         self.pipeline = [0] * self.actual_lead_time
-        
-        # Reset Time
-        self.current_step = 0
-        self.day_of_week = 0
-        self.month = 1
         
         return self._get_obs(), {}
 
@@ -82,7 +90,12 @@ class InventoryEnv(gym.Env):
 
         # Demand Generation
         # "What is the demand for this specific Month & Day?"
-        real_demand = self.sampler.sample(self.month, self.day_of_week)
+        real_demand, m, d = self.sampler.sample()
+
+        # Update Rolling History
+        self.recent_demand_history.append(real_demand)
+        if len(self.recent_demand_history) > 5:
+            self.recent_demand_history.pop(0)
 
         # Receive goods that were ordered 'lead_time' days ago
         arriving_inventory = self.pipeline.pop(0) 
@@ -104,13 +117,17 @@ class InventoryEnv(gym.Env):
         self.inventory = min(self.inventory, self.max_capacity)
 
         # Reward Calculation
-        # Profit = Revenue - Holding Cost - Shortage Penalty
-        revenue = sales * self.unit_price
-        holding_costs = self.inventory * self.holding_cost
-        penalty = missed_sales * self.shortage_penalty
-        
-        raw_reward = revenue - holding_costs - penalty
-        
+        # Profit = Revenue - Cogs - Holding Cost - Shortage Penalty
+        revenue = sales * self.config["unit_price"]
+
+        # Money leaving to pay the supplier
+        # We pay for what we ORDER, not what we sell (The Risk!)
+        procurement_cost = order_quantity * self.config["unit_cost"]
+        holding_costs = self.inventory * self.config["holding_cost"]
+        penalty = missed_sales * self.config["shortage_penalty"]
+
+        raw_reward = revenue - procurement_cost - holding_costs - penalty
+
         reward = raw_reward / self.reward_scale
 
         # Time updates
@@ -151,6 +168,9 @@ class InventoryEnv(gym.Env):
         # -1 helps the NN distinguish "Zero Order coming" between "Nothing exists here"
         padding_needed = self.max_lead_time - len(norm_pipeline)
         padded_pipeline = norm_pipeline + [-1.0] * padding_needed
+
+        avg_recent = np.mean(self.recent_demand_history)
+        norm_recent_demand = avg_recent / self.max_order
         
         # Cyclic Time Encoding
         # This helps NN understand that Day 6 (Sun) is close to Day 0 (Mon)
@@ -161,5 +181,5 @@ class InventoryEnv(gym.Env):
 
         norm_lead_time = self.actual_lead_time / self.max_lead_time
 
-        obs = np.concatenate(([norm_inv], padded_pipeline, [day_sin, day_cos, month_sin, month_cos, norm_lead_time]))
+        obs = np.concatenate(([norm_inv], padded_pipeline, [day_sin, day_cos, month_sin, month_cos, norm_lead_time], [norm_recent_demand]))
         return obs.astype(np.float32)

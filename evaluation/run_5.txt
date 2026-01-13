@@ -1,0 +1,7 @@
+========================================
+FINAL RESULTS TABLE
+========================================
+             Agent  Total Profit  Service Level (%)  Avg Inventory  Stockout Days
+               SAC      672838.5          96.916183     196.090411             23
+               PPO      581661.5          92.287164     276.073973             35
+Optimized Baseline      477209.0          78.871244     285.457534             80
