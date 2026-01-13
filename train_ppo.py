@@ -45,12 +45,12 @@ def train_ppo():
         verbose=1, 
         tensorboard_log=log_dir,
         ent_coef=0.01,
-        learning_rate=0.00005,
+        learning_rate=0.0001,
         batch_size=64
     )
 
     # Train
-    TIMESTEPS = 500000 
+    TIMESTEPS = 1000000 
     
     print(f"Training for {TIMESTEPS} timesteps...")
     model.learn(total_timesteps=TIMESTEPS, callback=eval_callback, tb_log_name="PPO_Advanced")
