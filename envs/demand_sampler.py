@@ -23,7 +23,7 @@ class DemandSampler:
         If sequential=False (Training), random start AND augmentation.
         """
         if self.sequential:
-            # TESTING MODE: Strict history, no magic multipliers
+            # TESTING MODE: Strict history
             self.current_idx = 0
             self.demand_multiplier = 1.0 
         else:

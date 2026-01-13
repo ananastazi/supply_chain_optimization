@@ -3,8 +3,6 @@ import numpy as np
 import os
 
 def preprocess_retail_data(input_file, output_dir='data'):
-    print("Starting Phase 1.1: Data Engineering")
-    
     # we load the raw dataset
     df = pd.read_csv(input_file)
     
